@@ -1,0 +1,339 @@
+model:
+# Machine Learning Model
+# LSTM
+# Train Data
+# x_train lat,lon,distance,speed,time diff
+# y_train pred_lat,pred_lon
+
+# !pip install pandas
+# !pip install scikit-learn
+# !pip install matplotlib
+
+import pandas as pd
+import matplotlib.pyplot as plt
+# for kaggle!!--------------------------------
+# import os
+# for dirname, _, filenames in os.walk('/kaggle/input'):
+#     for filename in filenames:
+#         print(os.path.join(dirname, filename))
+# end for kaggle!!------------------------------
+
+gps_df = pd.read_csv('gps_data-1.csv')
+df = pd.read_csv("IMU_data-1.csv")
+#gyro_df = pd.read_csv('gyro_data.csv')
+#accel_df = pd.read_csv('accel_data.csv')
+
+print('IMU-data')
+df.head()
+print('GPS-data')
+gps_df.head()
+import numpy as np
+import pandas as pd
+
+updated_positions = []
+
+# Constants
+EARTH_RADIUS = 6378137  # Earth's radius in meters
+dt = 0.02  # Time step in seconds
+
+# Initial values
+latitude = 45.326933  # Initial latitude
+longitude = -93.23063  # Initial longitude
+altitude = 245.257355  # Initial altitude in meters
+velocity = np.array([0.0, 0.0, 0.0])  # Initial velocity (m/s)
+
+# Convert pandas DataFrame to numpy arrays
+accelerometer = df[['accel_x', 'accel_y', 'accel_z']].to_numpy()
+gyroscope = df[['gyro_x', 'gyro_y', 'gyro_z']].to_numpy()
+
+# Iterate over sensor data
+for i in range(len(df)):
+    # Update orientation (simplified)
+    orientation = gyroscope[i] * dt
+
+    # Calculate acceleration in the global frame
+    net_acceleration = accelerometer[i] - np.array([0, 0, 9.81])  # Subtract gravity
+    global_acceleration = net_acceleration  # Simplified without rotation matrix
+
+    # Update velocity and displacement
+    velocity += global_acceleration * dt
+    displacement = velocity * dt
+
+    # Convert displacement to geographic coordinates
+    delta_lat = displacement[0] / EARTH_RADIUS
+    delta_lon = displacement[1] / (EARTH_RADIUS * np.cos(np.radians(latitude)))
+    delta_alt = displacement[2]
+
+    # Update position
+    latitude += np.degrees(delta_lat)
+    longitude += np.degrees(delta_lon)
+    altitude += delta_alt
+
+    updated_positions.append({
+        "Pred_Lat": latitude,
+        "Pred_Lon": longitude,
+        "Pred_Alt": altitude
+    })
+
+# Create a DataFrame from the updated positions
+pred_df = pd.DataFrame(updated_positions)
+
+# Display results
+print(pred_df.head())
+print(df.head())
+# Plot Latitude and Longitude
+plt.figure(figsize=(10, 6))
+# Plot Actual values
+
+# Plot Predicted values
+plt.plot(pred_df["Pred_Lat"],pred_df["Pred_Lon"], pred_df["Pred_Alt"],  marker="o", linestyle="-", color="yellow", label="Predicted")
+plt.plot(gps_df["gps_lat"], gps_df["gps_lon"],gps_df["gps_alt"], marker="o", linestyle="-", color="blue", label="Actual")
+
+# Add labels, title, and legend
+plt.title("Actual vs Predicted Path", fontsize=16)
+plt.xlabel("Longitude", fontsize=14)
+plt.ylabel("Latitude", fontsize=14)
+
+plt.grid(True)
+plt.legend()
+
+# Show the plot
+plt.show()
+train_x = df[['time','accel_x','accel_y','accel_z','gyro_x','gyro_y','gyro_z']]
+train_y=gps_df[['gps_lat','gps_lon','gps_alt']]
+
+print(train_x.tail(3))
+
+
+print(train_y.tail(3))
+import numpy as np
+# convert pandas dataframe to numpy array
+
+x_data = train_x.values
+x_data = np.array(x_data)
+# x_data = x_data.reshape(19828,5,1)
+x_data.shape
+y_data = train_y.values
+y_data.shape
+# Preporcessing Normalizing Valuse
+
+from sklearn.preprocessing import MinMaxScaler
+sc = MinMaxScaler(feature_range=(-1,1))
+# new_df= x_data[].reshape(x_data.shape[0],5)
+new_x_data = sc.fit_transform(x_data)
+new_x_data = new_x_data.reshape(36069,7)
+
+print('X_data shape :', x_data.shape)
+print('new X_data shape :', new_x_data.shape)
+
+
+
+new_y_data = sc.fit_transform(y_data)
+
+print('y_data shape :', y_data.shape)
+print('new y_data shape :', new_y_data.shape)
+import tensorflow as tf
+
+from tensorflow.python.keras.models import Sequential
+from tensorflow.python.keras.layers.recurrent import LSTM,RNN
+from tensorflow.python.keras.layers.core import Dense, Activation, Dropout
+
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.metrics import mean_squared_error
+from sklearn.utils import shuffle
+from sklearn.model_selection import train_test_split
+
+x_train, x_test, y_train, y_test = train_test_split(new_x_data, new_y_data, test_size=0.25, random_state=42)
+
+print(x_train.shape)
+print(y_train.shape)
+print(x_test.shape)
+print(y_test.shape)
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import LSTM, Dropout, Dense
+
+# Initialize the model
+model = Sequential()
+
+# First layer
+model.add(LSTM(units=500, input_shape=(7, 1), return_sequences=True))
+model.add(Dropout(0.2))
+
+# Second layer
+model.add(LSTM(units=1000, return_sequences=True))
+model.add(Dropout(0.2))
+
+
+# Third layer
+model.add(LSTM(units=500, return_sequences=False))
+model.add(Dropout(0.2))
+
+# Fourth Dense layer
+model.add(Dense(units=3))
+
+# Compile the model
+model.compile(loss='mean_absolute_error', optimizer='adam', metrics=['accuracy'])
+
+# Summarize the model
+model.summary()
+
+history = model.fit(x_train,y_train,epochs=70,validation_data=(x_test,y_test))
+
+model.save('model-1.keras')
+# model.save(args["model"])
+
+import tensorflow as tf
+new_model = tf.keras.models.load_model('model-1.keras')
+
+result = new_model.predict(x_test)
+result
+res_df = sc.inverse_transform(result)
+# res_df.reshape(new_df.shape[0],5,1)
+res_df
+y_test_actual=sc.inverse_transform(y_test)
+print(y_test_actual)
+# for i in range(len(result)):
+#     plt.scatter(result[0][i],result[1][i],c='r')
+#     plt.scatter(y_test[0][i],y_test[1][i],c='g')
+
+# plt.show()
+
+# Plotting actual points with GPS points
+
+predicted_df = pd.DataFrame(data=res_df[0:,0:],index=[i for i in range(res_df.shape[0])],columns=['f'+str(i) for i in range(res_df.shape[1])])
+
+actual_df = pd.DataFrame(data=y_test_actual[0:,0:],index=[i for i in range(y_test_actual.shape[0])],columns=['f'+str(i) for i in range(y_test_actual.shape[1])])
+
+# for i in range(len(res_df)):
+# #   print(i)
+plt.scatter(x=predicted_df['f0'],y=predicted_df['f1'],c='r',s=0.2,alpha=0.5)
+plt.scatter(x=actual_df['f0'],y=actual_df['f1'],c='g',s=0.2,alpha=0.5)
+
+plt.show()
+plt.scatter(x=predicted_df['f0'],y=predicted_df['f2'],c='r',s=0.2,alpha=0.5)
+plt.scatter(x=actual_df['f0'],y=actual_df['f2'],c='g',s=0.2,alpha=0.5)
+
+plt.show()
+plt.scatter(x=predicted_df['f1'],y=predicted_df['f2'],c='r',s=0.2,alpha=0.5)
+plt.scatter(x=actual_df['f1'],y=actual_df['f2'],c='g',s=0.2,alpha=0.5)
+
+plt.show()
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
+
+# Create a 3D plot
+fig = plt.figure(figsize=(12, 8))
+ax = fig.add_subplot(111, projection='3d')
+
+# Plot predicted points
+ax.scatter(predicted_df['f0'], predicted_df['f1'], predicted_df['f2'], c='r', s=0.2, alpha=0.5, label="Predicted")
+
+# Plot actual points
+ax.scatter(actual_df['f0'], actual_df['f1'], actual_df['f2'], c='g', s=0.2, alpha=0.5, label="Actual")
+
+# Add labels and title
+ax.set_xlabel('Feature 0 - latitude', fontsize=14)
+ax.set_ylabel('Feature 1 - longitude', fontsize=14)
+ax.set_zlabel('Feature 2 - altitude', fontsize=14)
+ax.set_title('Actual vs Predicted Points', fontsize=16)
+
+# Show legend
+ax.legend()
+
+# Show the plot
+plt.show()
+print('predicted')
+predicted_df.tail()
+
+print('actual')
+actual_df.tail()
+plt.plot(history.history['loss'])
+plt.show()
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+
+# Calculate errors between actual and predicted values
+error_lat = actual_df['f0'] - predicted_df['f0']  # Latitude error
+error_long = actual_df['f1'] - predicted_df['f1']  # Longitude error
+error_alt = actual_df['f2'] - predicted_df['f2']  # Altitude error (in meters)
+
+# Convert latitude and longitude errors to meters
+latitude_reference = sum(actual_df['f0']) / len(actual_df['f0'])  # Calculate mean latitude manually
+error_lat_meters = error_lat * 111111  # Convert latitude error to meters
+error_long_meters = error_long * 111111 * np.cos(np.radians(latitude_reference))  # Convert longitude error to meters
+
+
+# Combine errors into a matrix (DataFrame)
+error_matrix = pd.DataFrame({
+    'Latitude Error (m)': error_lat,
+    'Longitude Error (m)': error_long,
+    'Altitude Error (m)': error_alt
+})
+
+# Display the error matrix
+print("\nError Matrix (in meters):")
+print(error_matrix.head())  # Display the first few rows
+
+# Latitude error plot
+plt.subplot(3, 1, 1)
+error_lat.plot(figsize=(14,5), label='Latitude Error')
+plt.axhline(0, color='red', linestyle='-', linewidth=0.8)
+plt.title('Latitude Error in Meters')
+plt.xlabel('Sample Index')
+plt.ylabel('Error (meters)')
+plt.legend()
+
+# Longitude error plot
+plt.subplot(3, 1, 2)
+error_long.plot(figsize=(14,5), label='Longitude Error')
+plt.axhline(0, color='red', linestyle='-', linewidth=0.8)
+plt.title('Longitude Error in Meters')
+plt.xlabel('Sample Index')
+plt.ylabel('Error (meters)')
+plt.legend()
+
+# Altitude error plot
+plt.subplot(3, 1, 3)
+error_alt.plot(figsize=(14,5), label='Altitude Error')
+plt.axhline(0, color='red', linestyle='-', linewidth=0.8)
+plt.title('Altitude Error in Meters')
+plt.xlabel('Sample Index')
+plt.ylabel('Error (meters)')
+plt.legend()
+
+plt.tight_layout()
+plt.show()
+
+# mse and rmse 
+mse_lat = sum(error_lat_meters ** 2) / len(error_lat_meters)
+mse_long = sum(error_long_meters ** 2) / len(error_long_meters)
+mse_alt = sum(error_alt ** 2) / len(error_alt)
+
+rmse_lat = mse_lat ** 0.5  # RMSE for latitude
+rmse_long = mse_long ** 0.5  # RMSE for longitude
+rmse_alt = mse_alt ** 0.5  # RMSE for altitude
+
+# Display MSE and RMSE results
+print("Error Metrics:")
+print(f"Latitude:   MSE = {mse_lat:.2f}, RMSE = {rmse_lat:.2f} meters")
+print(f"Longitude:  MSE = {mse_long:.2f}, RMSE = {rmse_long:.2f} meters")
+print(f"Altitude:   MSE = {mse_alt:.2f}, RMSE = {rmse_alt:.2f} meters")
+
+# Plot errors and RMSE
+plt.figure(figsize=(10, 8))
+
+# RMSE values plot with labels for legend
+rmse_values = [rmse_lat, rmse_long, rmse_alt]
+labels = ['Latitude RMSE', 'Longitude RMSE', 'Altitude RMSE']
+
+# Plotting each bar with a label
+bars = plt.bar(labels, rmse_values, color=['blue', 'green', 'purple'], alpha=0.7, label=labels)
+
+# Adding title, labels, and legend
+plt.title('RMSE Values')
+plt.ylabel('RMSE (meters)')
+plt.legend(title='Error Type')
+
+plt.tight_layout()
+plt.show()
